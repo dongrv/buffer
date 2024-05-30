@@ -30,6 +30,28 @@ const (
 	stdVisits  = 5  // 最大访问次数
 )
 
+type Option struct {
+	Len     int     // 理想/健康长度
+	Cap     int     // 容量，超过容量会触发缩容到Len
+	Timeout float64 // 缓存过期时间
+	Limit   int64   // 缓存最大访问次数限制
+}
+
+func DefaultOption() OptionFunc {
+	return func(op *Option) {
+		op.Len = stdLen
+		op.Cap = stdCap
+		op.Timeout = stdTimeout
+		op.Limit = stdVisits
+	}
+}
+
+func (op *Option) Validate() bool {
+	return (op.Len > 0 && op.Timeout > 0 && op.Limit > 0) && (op.Cap > op.Len)
+}
+
+type OptionFunc func(option *Option)
+
 type Buffer struct {
 	op    *Option
 	store sync.Map
@@ -126,28 +148,6 @@ func (m *metric) Incr() *metric {
 func (m *metric) can(op *Option, t time.Duration) bool {
 	return t.Seconds()-m.recent.Seconds() <= op.Timeout && atomic.LoadInt64(&m.used) <= op.Limit
 }
-
-type Option struct {
-	Len     int     // 理想/健康长度
-	Cap     int     // 容量，超过容量会触发缩容到Len
-	Timeout float64 // 缓存过期时间
-	Limit   int64   // 缓存最大访问次数限制
-}
-
-func DefaultOption() OptionFunc {
-	return func(op *Option) {
-		op.Len = stdLen
-		op.Cap = stdCap
-		op.Timeout = stdTimeout
-		op.Limit = stdVisits
-	}
-}
-
-func (op *Option) Validate() bool {
-	return (op.Len > 0 && op.Timeout > 0 && op.Limit > 0) && (op.Cap > op.Len)
-}
-
-type OptionFunc func(option *Option)
 
 // 当前秒级时间戳
 func nowUnix() time.Duration {
