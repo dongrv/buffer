@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"errors"
 	"github.com/dongrv/iterator"
 	"google.golang.org/protobuf/proto"
 	"sort"
@@ -23,24 +24,30 @@ type ReaderWriter interface {
 }
 
 const (
-	stdTidyLen = 10 // 设定标准长度
-	stdTidyCap = 20 // 设定标准容量
+	stdLen     = 10 // 设定标准长度
+	stdCap     = 20 // 设定标准容量
 	stdTimeout = 10 // 设定失效时间
 	stdVisits  = 5  // 最大访问次数
 )
 
 type Buffer struct {
+	op    *Option
 	store sync.Map
 	iter  iterator.Iterator
 	mu    sync.RWMutex
 	tidy  map[int64]*metric
 }
 
-func New() *Buffer {
-	return &Buffer{
-		iter: iterator.New(),
-		tidy: make(map[int64]*metric, stdTidyLen),
+func New(options ...OptionFunc) (*Buffer, error) {
+	b := &Buffer{op: &Option{}, iter: iterator.New()}
+	for _, fn := range options {
+		fn(b.op)
 	}
+	if !b.op.Validate() {
+		return nil, errors.New("invalid option value")
+	}
+	b.tidy = make(map[int64]*metric, b.op.Len)
+	return b, nil
 }
 
 func (b *Buffer) Read(x int64) proto.Message {
@@ -48,7 +55,7 @@ func (b *Buffer) Read(x int64) proto.Message {
 	if !ok {
 		return nil
 	}
-	if !b.tidy[x].Can(nowUnix()) {
+	if !b.tidy[x].can(b.op, nowUnix()) {
 		return nil
 	}
 	b.tidy[x].Incr()
@@ -70,7 +77,7 @@ func (b *Buffer) Tidy() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if len(b.tidy) <= stdTidyCap {
+	if len(b.tidy) <= stdCap {
 		return
 	}
 
@@ -78,7 +85,7 @@ func (b *Buffer) Tidy() {
 	t := nowUnix()
 
 	for x, m := range b.tidy {
-		if !m.Can(t) {
+		if !m.can(b.op, t) {
 			b.store.Delete(x)
 			delete(b.tidy, x)
 			continue
@@ -90,8 +97,8 @@ func (b *Buffer) Tidy() {
 		return available[i].recent < available[j].recent
 	})
 
-	if len(b.tidy) > stdTidyLen {
-		for i := 0; i < len(b.tidy)-stdTidyLen; i++ {
+	if len(b.tidy) > stdLen {
+		for i := 0; i < len(b.tidy)-stdLen; i++ {
 			b.store.Delete(available[i].x)
 			delete(b.tidy, available[i].x)
 		}
@@ -116,12 +123,31 @@ func (m *metric) Incr() *metric {
 }
 
 // Can 是否可用
-func (m *metric) Can(t time.Duration) bool {
-	a := t.Seconds()-m.recent.Seconds() <= stdTimeout
-	b := atomic.LoadInt64(&m.used) <= stdVisits
-	//return t.Seconds()-m.recent.Seconds() <= stdTimeout || atomic.LoadInt64(&m.used) <= stdVisits
-	return a && b
+func (m *metric) can(op *Option, t time.Duration) bool {
+	return t.Seconds()-m.recent.Seconds() <= op.Timeout && atomic.LoadInt64(&m.used) <= op.Limit
 }
+
+type Option struct {
+	Len     int     // 理想/健康长度
+	Cap     int     // 容量，超过容量会触发缩容到Len
+	Timeout float64 // 缓存过期时间
+	Limit   int64   // 缓存最大访问次数限制
+}
+
+func DefaultOption() OptionFunc {
+	return func(op *Option) {
+		op.Len = stdLen
+		op.Cap = stdCap
+		op.Timeout = stdTimeout
+		op.Limit = stdVisits
+	}
+}
+
+func (op *Option) Validate() bool {
+	return (op.Len > 0 && op.Timeout > 0 && op.Limit > 0) && (op.Cap > op.Len)
+}
+
+type OptionFunc func(option *Option)
 
 // 当前秒级时间戳
 func nowUnix() time.Duration {
