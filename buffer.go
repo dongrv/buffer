@@ -144,7 +144,7 @@ func (m *metric) Incr() *metric {
 	return m
 }
 
-// Can 是否可用
+// can 是否可用
 func (m *metric) can(op *Option, t time.Duration) bool {
 	return t.Seconds()-m.recent.Seconds() <= op.Timeout && atomic.LoadInt64(&m.used) <= op.Limit
 }
