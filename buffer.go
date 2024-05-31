@@ -62,6 +62,7 @@ type Buffer struct {
 
 func New(options ...OptionFunc) (*Buffer, error) {
 	b := &Buffer{op: &Option{}, iter: iterator.New()}
+	DefaultOption()(b.op)
 	for _, fn := range options {
 		fn(b.op)
 	}
