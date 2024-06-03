@@ -18,7 +18,7 @@ type Writer interface {
 	Write(proto.Message) int64
 }
 
-type ReaderWriter interface {
+type ReadWriter interface {
 	Reader
 	Writer
 }
