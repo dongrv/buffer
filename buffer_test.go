@@ -96,3 +96,28 @@ func TestMetric_can(t *testing.T) {
 func debugWaitSecond(t int64) {
 	time.Sleep(time.Duration(t) * time.Second)
 }
+
+func TestSingle_Read(t *testing.T) {
+	single, err := NewSingle()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msg := &TestMessage{A: "1", B: 2}
+	x := single.Write(msg)
+	if x <= 0 {
+		t.Fatalf("unexpected %v", x)
+	}
+	// 测试过期
+	assert.Equal(t, msg, single.Read(x))
+	debugWaitSecond(stdTimeout + 1)
+	assert.Equal(t, nil, single.Read(x))
+	// 测试次数
+	x = single.Write(msg)
+	for i := 0; i < stdVisits-1; i++ {
+		single.Read(x)
+	}
+	assert.Equal(t, msg, single.Read(x))
+	assert.Equal(t, nil, single.Read(x))
+	// 测试序号
+	assert.Equal(t, int64(3), single.Write(msg))
+}

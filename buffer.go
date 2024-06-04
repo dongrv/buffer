@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var ErrInvalidValue = errors.New("invalid option value")
+
 type Reader interface {
 	Read(x int64) proto.Message
 }
@@ -145,6 +147,14 @@ func (m *metric) Incr() *metric {
 	return m
 }
 
+// Reset 重置
+func (m *metric) Reset(x int64) *metric {
+	atomic.SwapInt64(&m.x, x)
+	atomic.SwapInt64(&m.used, 1)
+	m.recent = nowUnix()
+	return m
+}
+
 // can 是否可用
 func (m *metric) can(op *Option, t time.Duration) bool {
 	return t.Seconds()-m.recent.Seconds() <= op.Timeout && atomic.LoadInt64(&m.used) <= op.Limit
@@ -153,4 +163,43 @@ func (m *metric) can(op *Option, t time.Duration) bool {
 // 当前秒级时间戳
 func nowUnix() time.Duration {
 	return time.Duration(time.Now().Unix()) * time.Second
+}
+
+// Single 缓存单例
+type Single struct {
+	op     *Option
+	store  proto.Message
+	iter   iterator.Func
+	metric *metric
+}
+
+func NewSingle(options ...OptionFunc) (*Single, error) {
+	s := &Single{
+		op:     &Option{},
+		iter:   iterator.Get(),
+		metric: newMetric(1),
+	}
+	DefaultOption()(s.op)
+	for _, fn := range options {
+		fn(s.op)
+	}
+	if !s.op.Validate() {
+		return nil, ErrInvalidValue
+	}
+	return s, nil
+}
+
+func (s *Single) Read(x int64) proto.Message {
+	if atomic.LoadInt64(&s.metric.x) == x && s.metric.can(s.op, nowUnix()) {
+		s.metric.Incr()
+		return s.store
+	}
+	return nil
+}
+
+func (s *Single) Write(msg proto.Message) int64 {
+	x := s.iter()
+	s.metric.Reset(x)
+	s.store = msg
+	return x
 }
