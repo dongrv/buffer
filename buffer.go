@@ -20,9 +20,14 @@ type Writer interface {
 	Write(proto.Message) int64
 }
 
-type ReadWriter interface {
+type Exist interface {
+	Exist(x int64) bool
+}
+
+type ReaderWriter interface {
 	Reader
 	Writer
+	Exist
 }
 
 const (
@@ -69,7 +74,7 @@ func New(options ...OptionFunc) (*Buffer, error) {
 		fn(b.op)
 	}
 	if !b.op.Validate() {
-		return nil, errors.New("invalid option value")
+		return nil, ErrInvalidValue
 	}
 	b.tidy = make(map[int64]*metric, b.op.Len)
 	return b, nil
@@ -95,6 +100,14 @@ func (b *Buffer) Write(msg proto.Message) int64 {
 	b.mu.Unlock()
 	b.Tidy()
 	return x
+}
+
+func (b *Buffer) Exist(x int64) bool {
+	_, ok := b.store.Load(x)
+	if !ok {
+		return false
+	}
+	return b.tidy[x].can(b.op, nowUnix())
 }
 
 // Tidy 整理删除无效元素
@@ -160,11 +173,6 @@ func (m *metric) can(op *Option, t time.Duration) bool {
 	return t.Seconds()-m.recent.Seconds() <= op.Timeout && atomic.LoadInt64(&m.used) <= op.Limit
 }
 
-// 当前秒级时间戳
-func nowUnix() time.Duration {
-	return time.Duration(time.Now().Unix()) * time.Second
-}
-
 // Single 缓存单例
 type Single struct {
 	op     *Option
@@ -177,7 +185,7 @@ func NewSingle(options ...OptionFunc) (*Single, error) {
 	s := &Single{
 		op:     &Option{},
 		iter:   iterator.Get(),
-		metric: newMetric(1),
+		metric: newMetric(0),
 	}
 	DefaultOption()(s.op)
 	for _, fn := range options {
@@ -202,4 +210,13 @@ func (s *Single) Write(msg proto.Message) int64 {
 	s.metric.Reset(x)
 	s.store = msg
 	return x
+}
+
+func (s *Single) Exist(x int64) bool {
+	return atomic.LoadInt64(&s.metric.x) == x && s.metric.can(s.op, nowUnix())
+}
+
+// 当前秒级时间戳
+func nowUnix() time.Duration {
+	return time.Duration(time.Now().Unix()) * time.Second
 }

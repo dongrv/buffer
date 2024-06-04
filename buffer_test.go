@@ -23,7 +23,7 @@ func mockBufferMessage(target int) []TestMessage {
 }
 
 func TestBuffer_Read(t *testing.T) {
-	b, _ := New(DefaultOption())
+	b, _ := New()
 	// 测试过期
 	x := b.Write(TestMessage{A: "1", B: 2})
 	_, ok := b.Read(x).(TestMessage)
@@ -36,6 +36,7 @@ func TestBuffer_Read(t *testing.T) {
 	for i := 0; i < stdVisits-1; i++ {
 		b.Read(x2)
 	}
+	assert.True(t, b.Exist(x2))
 	_, ok = b.Read(x2).(TestMessage)
 	assert.True(t, ok)
 	_, ok = b.Read(x2).(TestMessage)
@@ -116,6 +117,7 @@ func TestSingle_Read(t *testing.T) {
 	for i := 0; i < stdVisits-1; i++ {
 		single.Read(x)
 	}
+	assert.True(t, single.Exist(x))
 	assert.Equal(t, msg, single.Read(x))
 	assert.Equal(t, nil, single.Read(x))
 	// 测试序号
